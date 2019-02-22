@@ -3,7 +3,7 @@ import argparse
 from models import *
 from utils.datasets import *
 from utils.utils import *
-
+from tqdm import tqdm
 
 def test(
         cfg,
@@ -34,14 +34,13 @@ def test(
     model.to(device).eval()
 
     # Get dataloader
-    # dataloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path), batch_size=batch_size)  # pytorch
     dataloader = LoadImagesAndLabels(test_path, batch_size=batch_size, img_size=img_size)
 
     mean_mAP, mean_R, mean_P = 0.0, 0.0, 0.0
-    print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP'))
+    #print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP'))
     outputs, mAPs, mR, mP, TP, confidence, pred_class, target_class = [], [], [], [], [], [], [], []
     AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
-    for batch_i, (imgs, targets) in enumerate(dataloader):
+    for batch_i, (imgs, targets) in enumerate(tqdm(dataloader)):
         output = model(imgs.to(device))
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
@@ -71,8 +70,8 @@ def test(
                 target_boxes = xywh2xyxy(labels[:, 1:5]) * img_size
 
                 detected = []
-                for *pred_bbox, conf, obj_conf, obj_pred in detections:
-
+                for pred_bbox_0,pred_bbox_1,pred_bbox_2,pred_bbox_3, conf, obj_conf, obj_pred in detections:
+                    pred_bbox = [pred_bbox_0,pred_bbox_1,pred_bbox_2,pred_bbox_3]
                     pred_bbox = torch.FloatTensor(pred_bbox).view(1, -1)
                     # Compute iou with target boxes
                     iou = bbox_iou(pred_bbox, target_boxes)
@@ -89,6 +88,7 @@ def test(
             AP, AP_class, R, P = ap_per_class(tp=correct, conf=detections[:, 4], pred_cls=detections[:, 6],
                                               target_cls=target_cls)
 
+
             # Accumulate AP per class
             AP_accum_count += np.bincount(AP_class, minlength=nC)
             AP_accum += np.bincount(AP_class, minlength=nC, weights=AP)
@@ -103,15 +103,15 @@ def test(
             mean_R = np.mean(mR)
             mean_P = np.mean(mP)
 
-        # Print image mAP and running mean mAP
-        print(('%11s%11s' + '%11.3g' * 3) % (len(mAPs), dataloader.nF, mean_P, mean_R, mean_mAP))
+            # Print image mAP and running mean mAP
+            # print(('%11s%11s' + '%11.3g' * 3) % (len(mAPs), dataloader.nF, mean_P, mean_R, mean_mAP))
 
     # Print mAP per class
-    print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
+    #print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
 
     classes = load_classes(data_cfg_dict['names'])  # Extracts class labels from file
     for i, c in enumerate(classes):
-        print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
+        print('%15s: %-.4f' % (c, AP_accum[i] / AP_accum_count[i]))
 
     # Return mAP
     return mean_mAP, mean_R, mean_P
@@ -119,7 +119,7 @@ def test(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='cfg/coco.data', help='coco.data file path')
     parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')

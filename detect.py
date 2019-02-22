@@ -13,7 +13,7 @@ def detect(
         cfg,
         weights,
         images,
-        output='output',  # output folder
+        output='output',
         img_size=416,
         conf_thres=0.3,
         nms_thres=0.45,
@@ -28,12 +28,10 @@ def detect(
 
     # Initialize model
     model = Darknet(cfg, img_size)
-
     # Load weights
     if weights.endswith('.pt'):  # pytorch format
-        if weights.endswith('yolov3.pt') and not os.path.exists(weights):
-            if (platform == 'darwin') or (platform == 'linux'):
-                os.system('wget https://storage.googleapis.com/ultralytics/yolov3.pt -O ' + weights)
+        if weights.endswith('yolov3.pt') and not os.path.isfile(weights) and (platform == 'darwin'):
+            os.system('wget https://storage.googleapis.com/ultralytics/yolov3.pt -O ' + weights)
         model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
     else:  # darknet format
         load_darknet_weights(model, weights)
@@ -98,7 +96,7 @@ def detect(
             cv2.imwrite(save_path, im0)
 
         if webcam:  # Show live webcam
-            cv2.imshow(weights, im0)
+            cv2.imshow('result', im0)
 
     if save_images and (platform == 'darwin'):  # linux/macos
         os.system('open ' + output + ' ' + save_path)
@@ -107,7 +105,7 @@ def detect(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
-    parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
+    parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     parser.add_argument('--images', type=str, default='data/samples', help='path to images')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
     parser.add_argument('--conf-thres', type=float, default=0.50, help='object confidence threshold')
@@ -122,5 +120,6 @@ if __name__ == '__main__':
             opt.images,
             img_size=opt.img_size,
             conf_thres=opt.conf_thres,
-            nms_thres=opt.nms_thres
+            nms_thres=opt.nms_thres,
+            webcam=False
         )

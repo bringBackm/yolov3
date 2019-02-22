@@ -5,7 +5,7 @@ import test  # Import test.py to get mAP after each epoch
 from models import *
 from utils.datasets import *
 from utils.utils import *
-
+from tqdm import tqdm
 
 def train(
         cfg,
@@ -15,13 +15,11 @@ def train(
         epochs=100,
         batch_size=16,
         accumulated_batches=1,
+        weights='weights',
         multi_scale=False,
-        freeze_backbone=False,
+        freeze_backbone=True,
         var=0,
 ):
-    weights = 'weights' + os.sep
-    latest = weights + 'latest.pt'
-    best = weights + 'best.pt'
     device = torch_utils.select_device()
 
     if multi_scale:  # pass maximum multi_scale size
@@ -29,8 +27,12 @@ def train(
     else:
         torch.backends.cudnn.benchmark = True  # unsuitable for multiscale
 
+    latest = os.path.join(weights, 'latest.pt')
+    best = os.path.join(weights, 'best.pt')
+
     # Configure run
     train_path = parse_data_cfg(data_cfg)['train']
+    print(train_path)
 
     # Initialize model
     model = Darknet(cfg, img_size)
@@ -39,7 +41,6 @@ def train(
     dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True)
 
     lr0 = 0.001
-    cutoff = -1  # backbone reaches to cutoff layer
     if resume:
         checkpoint = torch.load(latest, map_location='cpu')
 
@@ -69,13 +70,8 @@ def train(
         start_epoch = 0
         best_loss = float('inf')
 
-        # Initialize model with backbone (optional)
-        if cfg.endswith('yolov3.cfg'):
-            load_darknet_weights(model, weights + 'darknet53.conv.74')
-            cutoff = 75
-        elif cfg.endswith('yolov3-tiny.cfg'):
-            load_darknet_weights(model, weights + 'yolov3-tiny.conv.15')
-            cutoff = 15
+        # Initialize model with darknet53 weights (optional)
+        load_darknet_weights(model, os.path.join(weights, 'darknet53.conv.74'))
 
         # if torch.cuda.device_count() > 1:
         #     model = nn.DataParallel(model)
@@ -92,8 +88,8 @@ def train(
     for epoch in range(epochs):
         epoch += start_epoch
 
-        print(('%8s%12s' + '%10s' * 7) % (
-            'Epoch', 'Batch', 'xy', 'wh', 'conf', 'cls', 'total', 'nTargets', 'time'))
+        print(('%8s%12s' + '%10s' * 9) % (
+            'Epoch', 'Batch', 'x', 'y', 'w', 'h', 'conf', 'cls', 'total', 'nTargets', 'time'))
 
         # Update scheduler (automatic)
         # scheduler.step()
@@ -107,15 +103,20 @@ def train(
             g['lr'] = lr
 
         # Freeze darknet53.conv.74 for first epoch
-        if freeze_backbone and (epoch < 2):
-            for i, (name, p) in enumerate(model.named_parameters()):
-                if int(name.split('.')[1]) < cutoff:  # if layer < 75
-                    p.requires_grad = False if (epoch == 0) else True
+        if freeze_backbone:
+            if epoch == 0:
+                for i, (name, p) in enumerate(model.named_parameters()):
+                    if int(name.split('.')[1]) < 75:  # if layer < 75
+                        p.requires_grad = False
+            elif epoch == 1:
+                for i, (name, p) in enumerate(model.named_parameters()):
+                    if int(name.split('.')[1]) < 75:  # if layer < 75
+                        p.requires_grad = True
 
         ui = -1
         rloss = defaultdict(float)  # running loss
         optimizer.zero_grad()
-        for i, (imgs, targets) in enumerate(dataloader):
+        for i, (imgs, targets) in enumerate(tqdm(dataloader)):
             if sum([len(x) for x in targets]) < 1:  # if no targets continue
                 continue
 
@@ -139,14 +140,12 @@ def train(
             for key, val in model.losses.items():
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
 
-            s = ('%8s%12s' + '%10.3g' * 7) % (
-                '%g/%g' % (epoch, epochs - 1),
-                '%g/%g' % (i, len(dataloader) - 1),
-                rloss['xy'], rloss['wh'], rloss['conf'],
-                rloss['cls'], rloss['loss'],
-                model.losses['nT'], time.time() - t0)
+            s = ('%8s%12s' + '%10.3g' * 9) % (
+                '%g/%g' % (epoch, epochs - 1), '%g/%g' % (i, len(dataloader) - 1), rloss['x'],
+                rloss['y'], rloss['w'], rloss['h'], rloss['conf'], rloss['cls'],
+                rloss['loss'], model.losses['nT'], time.time() - t0)
             t0 = time.time()
-            print(s)
+        print(s)
 
         # Update best loss
         loss_per_target = rloss['loss'] / rloss['nT']
@@ -164,9 +163,9 @@ def train(
         if best_loss == loss_per_target:
             os.system('cp ' + latest + ' ' + best)
 
-        # Save backup weights every 5 epochs (optional)
-        # if (epoch > 0) & (epoch % 5 == 0):
-        #     os.system('cp ' + latest + ' ' + weights + 'backup{}.pt'.format(epoch)))
+        # Save backup weights every 5 epochs
+        if (epoch > 0) & (epoch % 5 == 0):
+            os.system('cp ' + latest + ' ' + os.path.join(weights, 'backup{}.pt'.format(epoch)))
 
         # Calculate mAP
         with torch.no_grad():
@@ -180,13 +179,15 @@ def train(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
-    parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=4, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='cfg/coco.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
+    parser.add_argument('--weights', type=str, default='weights', help='path to store weights')
     parser.add_argument('--resume', action='store_true', help='resume training flag')
+    parser.add_argument('--freeze', action='store_true', help='freeze darknet53.conv.74 layers for first epoch')
     parser.add_argument('--var', type=float, default=0, help='test variable')
     opt = parser.parse_args()
     print(opt, end='\n\n')
@@ -201,6 +202,8 @@ if __name__ == '__main__':
         epochs=opt.epochs,
         batch_size=opt.batch_size,
         accumulated_batches=opt.accumulated_batches,
+        weights=opt.weights,
         multi_scale=opt.multi_scale,
+        freeze_backbone=opt.freeze,
         var=opt.var,
     )
