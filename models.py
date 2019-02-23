@@ -186,6 +186,7 @@ class YOLOLayer(nn.Module):
             w = p[..., 2]  # Width
             h = p[..., 3]  # Height
 
+            # using the ground truth categories and boxes to build the learning parameters of the network
             tx, ty, tw, th, mask, tcls = build_targets(targets, self.anchor_wh, self.nA, self.nC, nG)
 
             tcls = tcls[mask]

@@ -237,7 +237,8 @@ def build_targets(target, anchor_wh, nA, nC, nG):
         gx, gy, gw, gh = t[:, 1] * nG, t[:, 2] * nG, t[:, 3] * nG, t[:, 4] * nG
         #print(gx,gy,gw,gh) tensor([4.86877, 6.41581]) tensor([5.58180, 5.17956]) tensor([ 6.81248, 11.79978]) tensor([1.68392, 8.35538])
 
-        # Get grid box indices and prevent overflows (i.e. 13.01 on 13 anchors) must be an integer
+        # Get grid box indices and prevent overflows (i.e. 13.01 on 13 anchors)
+        # must be an integer
         gi = torch.clamp(gx.long(), min=0, max=nG - 1)
         gj = torch.clamp(gy.long(), min=0, max=nG - 1)
 
